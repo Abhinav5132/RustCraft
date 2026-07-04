@@ -1,12 +1,11 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use std::sync::Arc;
 use wgpu::{
-    Color, Device, DeviceDescriptor, ExperimentalFeatures, Features, Limits, Queue,
-    RequestAdapterOptions, Surface, SurfaceConfiguration, TextureUsages,
+    Color, Device, DeviceDescriptor, ExperimentalFeatures, Features, Limits,
+    Operations, Queue, RenderPassColorAttachment, Surface,
+    SurfaceConfiguration, TextureUsages
 };
 use winit::{
-    application::ApplicationHandler,
-    event::*,
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::Window,
@@ -110,9 +109,80 @@ impl State {
         }
     }
 
-    pub fn render(&mut self) {
-        self.window.request_redraw();
+    pub fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+        match (code, is_pressed) {
+            (KeyCode::Escape, true) => event_loop.exit(),
+            _ => {}
+        }
     }
 
-    fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {}
+    pub fn render(&mut self) -> Result<()> {
+        self.window.request_redraw();
+
+        if !self.is_surface_configured {
+            return Ok(());
+        }
+
+        let output = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
+            wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => {
+                self.surface.configure(&self.device, &self.config);
+                surface_texture
+            }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Validation => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.config);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                bail!("lost device");
+            }
+        };
+
+        let veiw = output
+            .texture
+            .create_view(&wgpu::wgt::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        {
+            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: &veiw,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: Operations {
+                        load: wgpu::LoadOp::Clear(Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+        }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        self.window.pre_present_notify();
+        self.queue.present(output);
+
+        Ok(())
+    }
+
+    pub fn update(&mut self) {}
 }
