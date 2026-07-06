@@ -1,17 +1,21 @@
 use anyhow::{Result, bail};
 use std::sync::Arc;
 use wgpu::{
-    BlendState, Color, ColorTargetState, ColorWrites, Device, DeviceDescriptor,
-    ExperimentalFeatures, Features, FragmentState, Limits, MultisampleState, Operations,
-    PipelineCompilationOptions, PipelineLayoutDescriptor, PrimitiveState, Queue,
+    BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites, Device,
+    DeviceDescriptor, ExperimentalFeatures, Features, FragmentState, Limits, MultisampleState,
+    Operations, PipelineCompilationOptions, PipelineLayoutDescriptor, PrimitiveState, Queue,
     RenderPassColorAttachment, RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor,
     Surface, SurfaceConfiguration, TextureUsages, VertexState,
+    util::{BufferInitDescriptor, DeviceExt},
 };
+
 use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
+
+use crate::vertex::Vertex;
 
 pub struct State {
     window: Arc<Window>,
@@ -22,6 +26,10 @@ pub struct State {
     is_surface_configured: bool,
     color: wgpu::Color,
     render_pipeline: RenderPipeline,
+    vertex_buffer: Buffer,
+    index_buffer: Buffer,
+    num_vertices: u32,
+    num_indicies: u32,
 }
 
 impl State {
@@ -111,12 +119,12 @@ impl State {
             vertex: VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[],
+                buffers: &[Some(Vertex::desc())],
                 compilation_options: PipelineCompilationOptions::default(),
             },
             fragment: Some(FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some("fr_main"),
                 targets: &[Some(ColorTargetState {
                     format: config.format,
                     blend: Some(BlendState::REPLACE),
@@ -143,6 +151,20 @@ impl State {
             cache: None,
         });
 
+        let new_triangle = Vertex::new_triangle();
+
+        let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(&(new_triangle.0)),
+            usage: BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Index buffer"),
+            contents: bytemuck::cast_slice(&(new_triangle.1)),
+            usage: BufferUsages::INDEX,
+        });
+
         Ok(Self {
             window: window,
             surface,
@@ -152,6 +174,10 @@ impl State {
             is_surface_configured: false,
             color: Color::default(),
             render_pipeline,
+            vertex_buffer,
+            index_buffer,
+            num_vertices: new_triangle.0.len() as u32,
+            num_indicies: new_triangle.1.len() as u32,
         })
     }
 
@@ -226,7 +252,9 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..self.num_indicies, 0, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
