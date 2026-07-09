@@ -106,7 +106,7 @@ impl State {
 
         let diffuse_bytes = include_bytes!("minecraft-soil.png");
         let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
-        let diffuse_rgb = diffuse_image.to_rgb8();
+        let diffuse_rgba = diffuse_image.to_rgba8();
         let dimmentions = diffuse_image.dimensions();
 
         let texture_size = Extent3d {
@@ -136,7 +136,7 @@ impl State {
                 origin: Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &diffuse_rgb,
+            &diffuse_rgba,
             TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * dimmentions.0),
@@ -268,7 +268,12 @@ impl State {
             queue,
             config,
             is_surface_configured: false,
-            color: Color::default(),
+            color: Color {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            },
             render_pipeline,
             vertex_buffer,
             index_buffer,
@@ -363,10 +368,4 @@ impl State {
     }
 
     pub fn update(&mut self) {}
-
-    pub fn handle_mouse_movement(&mut self, x: f64, y: f64) {
-        self.color.r = x / self.config.width as f64;
-        self.color.g = y / self.config.height as f64;
-        self.color.b = (x * y) / (self.config.width * self.config.height) as f64;
-    }
 }
