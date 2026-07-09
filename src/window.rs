@@ -1,22 +1,19 @@
 use anyhow::{Result, bail};
-use image::GenericImageView;
 use std::sync::Arc;
 use wgpu::{
     BindGroup, BindGroupLayoutEntry,
     BindingResource::{self},
     BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites, Device,
-    DeviceDescriptor, ExperimentalFeatures, Extent3d, Features, FragmentState, Limits,
-    MultisampleState, Operations, Origin3d, PipelineCompilationOptions, PipelineLayoutDescriptor,
-    PrimitiveState, Queue, RenderPassColorAttachment, RenderPipeline, RenderPipelineDescriptor,
-    SamplerDescriptor, ShaderModuleDescriptor, ShaderStages, Surface, SurfaceConfiguration,
-    TexelCopyBufferLayout, TexelCopyTextureInfo, TextureDescriptor, TextureUsages,
-    TextureViewDescriptor, VertexState,
+    DeviceDescriptor, ExperimentalFeatures, Features, FragmentState, Limits, MultisampleState,
+    Operations, PipelineCompilationOptions, PipelineLayoutDescriptor, PrimitiveState, Queue,
+    RenderPassColorAttachment, RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor,
+    ShaderStages, Surface, SurfaceConfiguration, TextureUsages, VertexState,
     util::{BufferInitDescriptor, DeviceExt},
 };
 
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::vertex::Vertex;
+use crate::{texture, vertex::Vertex};
 
 pub struct State {
     window: Arc<Window>,
@@ -32,6 +29,7 @@ pub struct State {
     num_vertices: u32,
     num_indicies: u32,
     diffuse_bind_group: BindGroup,
+    texture: texture::Texture,
 }
 
 impl State {
@@ -104,61 +102,6 @@ impl State {
             color_space: wgpu::SurfaceColorSpace::Srgb, // Srgb for now
         };
 
-        let diffuse_bytes = include_bytes!("minecraft-soil.png");
-        let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
-        let diffuse_rgba = diffuse_image.to_rgba8();
-        let dimmentions = diffuse_image.dimensions();
-
-        let texture_size = Extent3d {
-            width: dimmentions.0,
-            height: dimmentions.1,
-            // all textures are stored as 3d, we represent our 2D texture by setting depth to 1
-            depth_or_array_layers: 1,
-        };
-
-        let diffuse_texture = device.create_texture(&TextureDescriptor {
-            size: texture_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            // texture binding tells that we want to use this texture in shaders
-            // copy_dst means tha twe want to copy data to this texture
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            label: Some("diffuse_texture"),
-            view_formats: &[],
-        });
-
-        queue.write_texture(
-            TexelCopyTextureInfo {
-                texture: &diffuse_texture,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &diffuse_rgba,
-            TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * dimmentions.0),
-                rows_per_image: Some(dimmentions.1),
-            },
-            texture_size,
-        );
-
-        let diffuse_texture_view = diffuse_texture.create_view(&TextureViewDescriptor::default());
-        let diffuse_sampler = device.create_sampler(&SamplerDescriptor {
-            // determines what to do if the sampler gets a texture coordinate thats outside the
-            // textures itself. Possible option: ClampToEdge, Repear, MirrorRepeat
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            // describe what to do when the sample footprint is smaller or larger than one textel
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
-
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("texture_bind_group_layout"),
@@ -183,16 +126,20 @@ impl State {
                     },
                 ],
             });
+
+        let diffuse_bytes = include_bytes!("minecraft-soil.png");
+        let diffuse_texture =
+            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "grass_block").unwrap();
         let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&diffuse_sampler),
+                    resource: BindingResource::Sampler(&diffuse_texture.sampler),
                 },
             ],
             label: Some("diffuse_bind_group"),
@@ -280,6 +227,7 @@ impl State {
             num_vertices: new_triangle.0.len() as u32,
             num_indicies: new_triangle.1.len() as u32,
             diffuse_bind_group: diffuse_bind_group,
+            texture: diffuse_texture,
         })
     }
 

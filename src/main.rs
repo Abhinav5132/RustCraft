@@ -1,6 +1,7 @@
 use crate::app::App;
 use anyhow::Result;
 pub mod app;
+pub mod texture;
 pub mod vertex;
 pub mod window;
 
