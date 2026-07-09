@@ -1,19 +1,20 @@
 use anyhow::{Result, bail};
+use image::GenericImageView;
 use std::sync::Arc;
 use wgpu::{
+    BindGroup, BindGroupLayoutEntry,
+    BindingResource::{self},
     BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites, Device,
-    DeviceDescriptor, ExperimentalFeatures, Features, FragmentState, Limits, MultisampleState,
-    Operations, PipelineCompilationOptions, PipelineLayoutDescriptor, PrimitiveState, Queue,
-    RenderPassColorAttachment, RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor,
-    Surface, SurfaceConfiguration, TextureUsages, VertexState,
+    DeviceDescriptor, ExperimentalFeatures, Extent3d, Features, FragmentState, Limits,
+    MultisampleState, Operations, Origin3d, PipelineCompilationOptions, PipelineLayoutDescriptor,
+    PrimitiveState, Queue, RenderPassColorAttachment, RenderPipeline, RenderPipelineDescriptor,
+    SamplerDescriptor, ShaderModuleDescriptor, ShaderStages, Surface, SurfaceConfiguration,
+    TexelCopyBufferLayout, TexelCopyTextureInfo, TextureDescriptor, TextureUsages,
+    TextureViewDescriptor, VertexState,
     util::{BufferInitDescriptor, DeviceExt},
 };
 
-use winit::{
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
-};
+use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 use crate::vertex::Vertex;
 
@@ -30,6 +31,7 @@ pub struct State {
     index_buffer: Buffer,
     num_vertices: u32,
     num_indicies: u32,
+    diffuse_bind_group: BindGroup,
 }
 
 impl State {
@@ -102,6 +104,100 @@ impl State {
             color_space: wgpu::SurfaceColorSpace::Srgb, // Srgb for now
         };
 
+        let diffuse_bytes = include_bytes!("minecraft-soil.png");
+        let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
+        let diffuse_rgb = diffuse_image.to_rgb8();
+        let dimmentions = diffuse_image.dimensions();
+
+        let texture_size = Extent3d {
+            width: dimmentions.0,
+            height: dimmentions.1,
+            // all textures are stored as 3d, we represent our 2D texture by setting depth to 1
+            depth_or_array_layers: 1,
+        };
+
+        let diffuse_texture = device.create_texture(&TextureDescriptor {
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            // texture binding tells that we want to use this texture in shaders
+            // copy_dst means tha twe want to copy data to this texture
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            label: Some("diffuse_texture"),
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &diffuse_texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &diffuse_rgb,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * dimmentions.0),
+                rows_per_image: Some(dimmentions.1),
+            },
+            texture_size,
+        );
+
+        let diffuse_texture_view = diffuse_texture.create_view(&TextureViewDescriptor::default());
+        let diffuse_sampler = device.create_sampler(&SamplerDescriptor {
+            // determines what to do if the sampler gets a texture coordinate thats outside the
+            // textures itself. Possible option: ClampToEdge, Repear, MirrorRepeat
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            // describe what to do when the sample footprint is smaller or larger than one textel
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("texture_bind_group_layout"),
+                entries: &[
+                    // has two slots one for the the texture and one for the sampler.
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT, // makes these only visible to the fragment
+                        // shader
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&diffuse_sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
+
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -109,7 +205,7 @@ impl State {
 
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Render pipeline layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[Some(&texture_bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -178,6 +274,7 @@ impl State {
             index_buffer,
             num_vertices: new_triangle.0.len() as u32,
             num_indicies: new_triangle.1.len() as u32,
+            diffuse_bind_group: diffuse_bind_group,
         })
     }
 
@@ -252,6 +349,7 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indicies, 0, 0..1);
