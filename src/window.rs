@@ -13,7 +13,11 @@ use wgpu::{
 
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::{texture, vertex::Vertex};
+use crate::{
+    camera::{self, camera::Camera, camera_state::CameraState},
+    texture,
+    vertex::Vertex,
+};
 
 pub struct State {
     window: Arc<Window>,
@@ -30,6 +34,8 @@ pub struct State {
     num_indicies: u32,
     diffuse_bind_group: BindGroup,
     texture: texture::Texture,
+    camera: Camera,
+    camera_state: CameraState,
 }
 
 impl State {
@@ -207,6 +213,8 @@ impl State {
             contents: bytemuck::cast_slice(&(new_triangle.1)),
             usage: BufferUsages::INDEX,
         });
+        let camera = Camera::new(config.width as f32, config.height as f32);
+        let camera_state = CameraState::get_camera_init_state(&device);
 
         Ok(Self {
             window: window,
@@ -228,6 +236,8 @@ impl State {
             num_indicies: new_triangle.1.len() as u32,
             diffuse_bind_group: diffuse_bind_group,
             texture: diffuse_texture,
+            camera: camera,
+            camera_state: camera_state,
         })
     }
 
