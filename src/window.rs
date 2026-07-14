@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use cgmath::Deg;
 use std::sync::Arc;
 use wgpu::{
     BindGroup, BindGroupLayoutEntry,
@@ -11,10 +12,19 @@ use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
 };
 
-use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
+use winit::{
+    event::{MouseButton, MouseScrollDelta},
+    event_loop::ActiveEventLoop,
+    keyboard::KeyCode,
+    window::Window,
+};
 
 use crate::{
-    camera::{self, camera::Camera, camera_state::CameraState},
+    camera::{
+        camera::Camera, camera_controller::CameraController, camera_state::CameraState,
+        projection::Projection,
+    },
+    inputs::keybinds::KeyBindings,
     texture,
     vertex::Vertex,
 };
@@ -36,6 +46,10 @@ pub struct State {
     texture: texture::Texture,
     camera: Camera,
     camera_state: CameraState,
+    pub camera_controller: CameraController,
+    pub mouse_pressed: bool,
+    projection: Projection,
+    bindings: KeyBindings,
 }
 
 impl State {
@@ -151,6 +165,20 @@ impl State {
             label: Some("diffuse_bind_group"),
         });
 
+        let camera = Camera::new((0.0, 5.0, 10.0), Deg(-90.0), Deg(-20.0));
+        let projection = Projection::new(
+            config.width as f32,
+            config.height as f32,
+            Deg(45.0),
+            0.1,
+            100.0,
+        );
+        let camera_controller = CameraController::new(4.0, 0.4);
+        let mut camera_state = CameraState::get_camera_init_state(&device);
+        camera_state
+            .camera_uniform
+            .update_view_proj(&camera, &projection);
+
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -158,7 +186,10 @@ impl State {
 
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Render pipeline layout"),
-            bind_group_layouts: &[Some(&texture_bind_group_layout)],
+            bind_group_layouts: &[
+                Some(&texture_bind_group_layout),
+                Some(&camera_state.camera_bind_group_layout),
+            ],
             immediate_size: 0,
         });
 
@@ -213,8 +244,8 @@ impl State {
             contents: bytemuck::cast_slice(&(new_triangle.1)),
             usage: BufferUsages::INDEX,
         });
-        let camera = Camera::new(config.width as f32, config.height as f32);
-        let camera_state = CameraState::get_camera_init_state(&device);
+
+        let bindings = KeyBindings::default(); // Change this later
 
         Ok(Self {
             window: window,
@@ -238,23 +269,46 @@ impl State {
             texture: diffuse_texture,
             camera: camera,
             camera_state: camera_state,
+            camera_controller: camera_controller,
+            mouse_pressed: false,
+            projection: projection,
+            bindings: bindings,
         })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
+            self.projection.resize(width as f32, height as f32);
+            self.is_surface_configured = true;
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            self.is_surface_configured = true;
         }
     }
 
-    pub fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        match (code, is_pressed) {
-            (KeyCode::Escape, true) => event_loop.exit(),
+    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+        if let Some(action) = self.bindings.get_action(&code) {
+            if !self.camera_controller.handle_key(is_pressed, action) {
+                match (code, is_pressed) {
+                    (KeyCode::Escape, true) => event_loop.exit(),
+                    _ => {}
+                }
+            }
+        } else {
+            return;
+        }
+    }
+
+    pub fn handle_mouse(&mut self, button: MouseButton, pressed: bool) {
+        match button {
+            MouseButton::Middle => self.mouse_pressed = pressed, //TODO move this key defination
+            //into keybinds struct
             _ => {}
         }
+    }
+
+    pub fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
+        self.camera_controller.handle_mouse_scroll(delta);
     }
 
     pub fn render(&mut self) -> Result<()> {
@@ -313,6 +367,7 @@ impl State {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_state.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indicies, 0, 0..1);
@@ -325,5 +380,15 @@ impl State {
         Ok(())
     }
 
-    pub fn update(&mut self) {}
+    pub fn update(&mut self, dt: std::time::Duration) {
+        self.camera_controller.update_camera(&mut self.camera, dt);
+        self.camera_state
+            .camera_uniform
+            .update_view_proj(&self.camera, &self.projection);
+        self.queue.write_buffer(
+            self.camera_state.get_camera_buffer(),
+            0,
+            bytemuck::cast_slice(&[self.camera_state.camera_uniform]),
+        );
+    }
 }

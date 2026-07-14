@@ -40,7 +40,7 @@ impl Texture {
             // texture binding tells that we want to use this texture in shaders
             // copy_dst means tha twe want to copy data to this texture
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            label: Some("diffuse_texture"),
+            label: Some(label),
             view_formats: &[],
         });
 
@@ -82,4 +82,3 @@ impl Texture {
         });
     }
 }
-

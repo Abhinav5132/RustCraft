@@ -1,4 +1,4 @@
-use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat};
+use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

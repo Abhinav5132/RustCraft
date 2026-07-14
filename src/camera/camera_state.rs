@@ -1,20 +1,21 @@
 use wgpu::util::DeviceExt;
 use wgpu::{
-    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor, BufferUsages, Device,
-    ShaderStages,
+    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor, Buffer, BufferUsages,
+    Device, ShaderStages,
 };
 
 use crate::camera::camera_uniform::{self, CameraUniform};
 
 pub struct CameraState {
-    camera_uniform: CameraUniform,
-    camrea_bind_group: BindGroup,
-    camea_bind_group_layout: BindGroupLayout,
+    pub camera_uniform: CameraUniform,
+    pub camera_bind_group: BindGroup,
+    pub camera_bind_group_layout: BindGroupLayout,
+    pub camera_buffer: Buffer,
 }
 
 impl CameraState {
     pub fn get_camera_init_state(device: &Device) -> CameraState {
-        let mut camera_uniform = camera_uniform::CameraUniform::new();
+        let camera_uniform = camera_uniform::CameraUniform::new();
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -48,8 +49,13 @@ impl CameraState {
 
         Self {
             camera_uniform: camera_uniform,
-            camrea_bind_group: camera_bind_group,
-            camea_bind_group_layout: camera_bind_group_layout,
+            camera_bind_group: camera_bind_group,
+            camera_bind_group_layout: camera_bind_group_layout,
+            camera_buffer: camera_buffer,
         }
+    }
+
+    pub fn get_camera_buffer(&self) -> &Buffer {
+        &self.camera_buffer
     }
 }

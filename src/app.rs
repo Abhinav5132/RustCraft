@@ -11,8 +11,8 @@ use winit::event_loop::EventLoopProxy;
 use winit::{
     application::ApplicationHandler,
     event::*,
-    event_loop::{self, ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
+    event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::PhysicalKey,
     window::Window,
 };
 
@@ -20,6 +20,7 @@ pub struct App {
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<State>>,
     state: Option<State>,
+    last_time: instant::Instant,
 }
 
 impl App {
@@ -31,6 +32,7 @@ impl App {
             state: None,
             #[cfg(target_arch = "wasm32")]
             proxy,
+            last_time: instant::Instant::now(),
         }
     }
 
@@ -45,7 +47,7 @@ impl App {
             console_log::init_with_level(log::Level::Info).unwrap_throw();
         }
 
-        let mut event_loop = EventLoop::with_user_event().build()?;
+        let event_loop = EventLoop::with_user_event().build()?;
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut app = App::new();
@@ -125,10 +127,32 @@ impl ApplicationHandler<State> for App {
         self.state = Some(event);
     }
 
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        let state = if let Some(state) = &mut self.state {
+            state
+        } else {
+            return;
+        };
+
+        match event {
+            DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+                if state.mouse_pressed {
+                    state.camera_controller.handle_mouse(dx, dy);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        window_id: winit::window::WindowId,
+        _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
         let state = match &mut self.state {
@@ -140,7 +164,9 @@ impl ApplicationHandler<State> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
-                state.update();
+                let dt = self.last_time.elapsed();
+                self.last_time = instant::Instant::now();
+                state.update(dt);
                 match state.render() {
                     Ok(_) => {}
                     Err(e) => {
@@ -148,6 +174,16 @@ impl ApplicationHandler<State> for App {
                         event_loop.exit();
                     }
                 }
+            }
+            WindowEvent::MouseInput {
+                state: btn_state,
+                button,
+                ..
+            } => {
+                state.handle_mouse(button, btn_state.is_pressed());
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                state.handle_mouse_scroll(&delta);
             }
             WindowEvent::KeyboardInput {
                 event:

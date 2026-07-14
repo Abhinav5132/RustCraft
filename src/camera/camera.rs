@@ -1,13 +1,9 @@
-use cgmath::{Matrix4, Point3, Vector3, perspective};
+use cgmath::{InnerSpace, Matrix4, Point3, Rad, Vector3};
 
 pub struct Camera {
-    eye: Point3<f32>,
-    target: Point3<f32>,
-    up: Vector3<f32>,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
+    pub position: Point3<f32>,
+    pub yaw: Rad<f32>,
+    pub pitch: Rad<f32>,
 }
 
 pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::from_cols(
@@ -18,22 +14,26 @@ pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::from_cols(
 );
 
 impl Camera {
-    pub fn new(width: f32, height: f32) -> Self {
+    pub fn new<V: Into<Point3<f32>>, Y: Into<Rad<f32>>, P: Into<Rad<f32>>>(
+        position: V,
+        yaw: Y,
+        pitch: P,
+    ) -> Self {
         Camera {
-            eye: (0.0, 1.0, 2.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
-            up: Vector3::unit_y(),
-            aspect: width / height,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
+            position: position.into(),
+            yaw: yaw.into(),
+            pitch: pitch.into(),
         }
     }
 
-    pub fn build_view_projection_matrix(&self) -> Matrix4<f32> {
-        let view = Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let proj = perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+    pub fn calc_matrix(&self) -> Matrix4<f32> {
+        let (sin_pitch, cos_pitch) = self.pitch.0.sin_cos();
+        let (sin_yaw, cos_yaw) = self.yaw.0.sin_cos();
 
-        return OPENGL_TO_WGPU_MATRIX * proj * view;
+        Matrix4::look_to_rh(
+            self.position,
+            Vector3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize(),
+            Vector3::unit_y(),
+        )
     }
 }
